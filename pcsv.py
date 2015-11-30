@@ -40,9 +40,9 @@ def limit(args):
             break
 
 
-def find(args):
+def select(args):
     """
-        cat example.csv | pcsv find -f 'field1 field2'
+        cat example.csv | pcsv select -f 'field1 field2'
     """
     head = None
     fields = None
@@ -221,7 +221,7 @@ def aggregate(args):
 if __name__ == "__main__":
     parser = ArgumentParser()
 
-    parser.add_argument('cmd', help='command name', choices=['count', 'limit', 'find', 'filter', 'extract', 'sort', 'aggregate'])
+    parser.add_argument('cmd', help='command name', choices=['count', 'limit', 'select', 'filter', 'extract', 'sort', 'aggregate'])
     parser.add_argument('-d', '--delimiter', help='delimiter', default=',')
     parser.add_argument('-l', '--limit', help='limit', type=int)
     parser.add_argument('-f', '--fields', help='fields')
