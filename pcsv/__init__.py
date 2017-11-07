@@ -1,29 +1,20 @@
-#! /usr/bin/env python
-
 import re
 import sys
 import csv
 import math
 import errno
-from argparse import ArgumentParser
-
-
-
-def _convert(e):
-    try:
-        return eval(e)
-    except Exception:
-        return e
 
 
 def count(args):
     """
         cat example.csv | pcsv count
     """
-    c = -1
-    for _ in sys.stdin:
+    c = 0
+    if args.head:
+        c -= 1
+    for _ in sys.stdin.buffer:
         c += 1
-    print >> sys.stdout, c
+    print(c)
     sys.stdout.flush()
 
 
@@ -31,7 +22,9 @@ def limit(args):
     """
         cat example.csv | pcsv limit -l 10
     """
-    c = -1
+    c = 0
+    if args.head:
+        c -= 1
     for line in sys.stdin:
         sys.stdout.write(line)
         sys.stdout.flush()
@@ -44,21 +37,27 @@ def select(args):
     """
         cat example.csv | pcsv select -f 'field1 field2'
     """
+    fields = args.fields.split() if args.fields else None
+
     head = None
-    fields = None
 
     reader = csv.reader(sys.stdin, delimiter=args.delimiter)
     writer = csv.writer(sys.stdout, delimiter=args.delimiter)
     for r in reader:
         try:
-            if head is None:
+            if args.head and head is None:
                 head = r
-                fields = r if args.fields is None else args.fields.split()
 
-            tr = [
-                e for i, e in enumerate(r)
-                if head[i] in fields
-            ]
+            if args.head:
+                tr = [
+                    e for i, e in enumerate(r)
+                    if head[i] in fields
+                ]
+            else:
+                tr = [
+                    e for i, e in enumerate(r)
+                    if str(i) in fields
+                ]
 
             writer.writerow(map(str, tr))
             sys.stdout.flush()
@@ -78,21 +77,24 @@ def filter(args):
     writer = csv.writer(sys.stdout, delimiter=args.delimiter)
     for r in reader:
         try:
-            if head is None:
-                head = r
-                writer.writerow(r)
-                sys.stdout.flush()
-
-            else:
-                r = map(_convert, r)
-
-                cnd = args.cond
-                for i, h in enumerate(head):
-                    cnd = re.sub(r'r\.%s([^\w_]*)' % h, r'r[%d]\1' % i, cnd)
-
-                if eval(cnd):
-                    writer.writerow(map(str, r))
+            if args.head:
+                if head is None:
+                    head = r
+                    writer.writerow(r)
                     sys.stdout.flush()
+                    continue
+            else:
+                head = list(map(str, range(len(r))))
+
+            r = list(map(_convert, r))
+
+            cnd = args.cond
+            for i, h in enumerate(head):
+                cnd = re.sub(r'r\.%s([^\w_]*)' % h, r'r[%d]\1' % i, cnd)
+
+            if eval(cnd):
+                writer.writerow(map(str, r))
+                sys.stdout.flush()
 
         except IOError as err:
             if err.errno == errno.EPIPE:
@@ -109,23 +111,26 @@ def extract(args):
     writer = csv.writer(sys.stdout, delimiter=args.delimiter)
     for r in reader:
         try:
-            if head is None:
-                head = r
-                cnt = args.extract.count(',') + 1
-                writer.writerow(range(cnt))
-                sys.stdout.flush()
-
+            if args.head:
+                if head is None:
+                    head = r
+                    cnt = args.extract.count(',') + 1
+                    writer.writerow(range(cnt))
+                    sys.stdout.flush()
+                    continue
             else:
-                r = map(_convert, r)
+                head = list(map(str, range(len(r))))
 
-                extr = args.extract
-                for i, h in enumerate(head):
-                    extr = re.sub(r'r\.%s([^\w_]*)' % h, r'r[%d]\1' % i, extr)
+            r = list(map(_convert, r))
 
-                tr = eval(extr)
+            extr = args.extract
+            for i, h in enumerate(head):
+                extr = re.sub(r'r\.%s([^\w_]*)' % h, r'r[%d]\1' % i, extr)
 
-                writer.writerow(map(str, tr))
-                sys.stdout.flush()
+            tr = eval(extr)
+
+            writer.writerow(map(str, tr))
+            sys.stdout.flush()
 
         except IOError as err:
             if err.errno == errno.EPIPE:
@@ -143,15 +148,18 @@ def sort(args):
     data = []
     for r in reader:
         try:
-            if head is None:
-                head = r
-                writer.writerow(r)
-                sys.stdout.flush()
-
+            if args.head:
+                if head is None:
+                    head = r
+                    writer.writerow(r)
+                    sys.stdout.flush()
+                    continue
             else:
-                r = map(_convert, r)
+                head = list(map(str, range(len(r))))
 
-                data.append(r)
+            r = list(map(_convert, r))
+
+            data.append(r)
 
         except IOError as err:
             if err.errno == errno.EPIPE:
@@ -184,26 +192,29 @@ def aggregate(args):
     writer = csv.writer(sys.stdout, delimiter=args.delimiter)
     for r in reader:
         try:
-            if head is None:
-                head = r
-
+            if args.head:
+                if head is None:
+                    head = r
+                    continue
             else:
-                r = map(_convert, r)
+                head = list(map(str, range(len(r))))
 
-                key = args.key
-                for i, h in enumerate(head):
-                    key = re.sub(r'r\.%s([^\w_]*)' % h, r'r[%d]\1' % i, key)
-                key = eval(key)
+            r = list(map(_convert, r))
 
-                if key not in result:
-                    result[key] = eval(args.begin)
+            key = args.key
+            for i, h in enumerate(head):
+                key = re.sub(r'r\.%s([^\w_]*)' % h, r'r[%d]\1' % i, key)
+            key = eval(key)
 
-                redc = args.reduce
-                for i, h in enumerate(head):
-                    redc = re.sub(r'r\.%s([^\w_]*)' % h, r'r[%d]\1' % i, redc)
-                redc = redc.replace('result[', 'result[key][')
+            if key not in result:
+                result[key] = eval(args.begin)
 
-                exec redc
+            redc = args.reduce
+            for i, h in enumerate(head):
+                redc = re.sub(r'r\.%s([^\w_]*)' % h, r'r[%d]\1' % i, redc)
+            redc = redc.replace('result[', 'result[key][')
+
+            exec(redc)
 
         except IOError as err:
             if err.errno == errno.EPIPE:
@@ -217,20 +228,8 @@ def aggregate(args):
         sys.stdout.flush()
 
 
-
-if __name__ == "__main__":
-    parser = ArgumentParser()
-
-    parser.add_argument('cmd', help='command name', choices=['count', 'limit', 'select', 'filter', 'extract', 'sort', 'aggregate'])
-    parser.add_argument('-d', '--delimiter', help='delimiter', default=',')
-    parser.add_argument('-l', '--limit', help='limit', type=int)
-    parser.add_argument('-f', '--fields', help='fields')
-    parser.add_argument('-c', '--cond', help='condition')
-    parser.add_argument('-e', '--extract', help='extract')
-    parser.add_argument('-k', '--key', help='key')
-    parser.add_argument('-b', '--begin', help='begin')
-    parser.add_argument('-r', '--reduce', help='reduce')
-
-    args = parser.parse_args()
-
-    globals()[args.cmd](args)
+def _convert(e):
+    try:
+        return eval(e)
+    except Exception:
+        return e
