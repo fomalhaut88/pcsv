@@ -11,7 +11,7 @@ from setuptools import find_packages
 
 setup(
     name='pcsv',
-    version='1.0',
+    version='2.0',
     packages=find_packages(),
     license="Free",
     long_description=open('README.md').read(),

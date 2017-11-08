@@ -1,235 +1,213 @@
 import re
-import sys
 import csv
-import math
-import errno
+from copy import deepcopy
+from argparse import ArgumentParser
 
 
-def count(args):
-    """
-        cat example.csv | pcsv count
-    """
-    c = 0
-    if args.head:
-        c -= 1
-    for _ in sys.stdin.buffer:
-        c += 1
-    print(c)
-    sys.stdout.flush()
+class Pcsv:
+    COMMANDS = ['count', 'limit', 'select', 'filter', 'extract', 'sort', 'aggregate']
 
+    def __init__(self, args):
+        self._args = args
 
-def limit(args):
-    """
-        cat example.csv | pcsv limit -l 10
-    """
-    c = 0
-    if args.head:
-        c -= 1
-    for line in sys.stdin:
-        sys.stdout.write(line)
-        sys.stdout.flush()
-        c += 1
-        if c >= args.limit:
-            break
+        self._head = []
+        self._result = []
+        self._state = {}
+        self._leave = False
 
+    def pipe(self, sin, sout):
+        del self._head[:]
+        del self._result[:]
+        self._state.clear()
+        self._leave = False
 
-def select(args):
-    """
-        cat example.csv | pcsv select -f 'field1 field2'
-    """
-    fields = args.fields.split() if args.fields else None
+        proc = self._row_processor()
+        proc.send(None)
 
-    head = None
+        reader = csv.reader(sin)
+        writer = csv.writer(sout)
+        for row in reader:
+            rownew = proc.send(row)
 
-    reader = csv.reader(sys.stdin, delimiter=args.delimiter)
-    writer = csv.writer(sys.stdout, delimiter=args.delimiter)
-    for r in reader:
+            if rownew is not None:
+                writer.writerow(rownew)
+
+            if self._leave:
+                break
+
+        for resrow in self._result:
+            writer.writerow(resrow)
+
+    def _row_processor(self):
+        result = None
+        while True:
+            row = yield result
+            result = self._handle(row)
+
+    def _handle(self, row):
+        routine = self._get_routine(self._args.cmd)
+        return routine(row)
+
+    def _get_routine(self, name):
+        return getattr(self, '_' + name)
+
+    def _create_head(self, row):
+        if self._args.head:
+            return row
+        else:
+            return list(range(len(row)))
+
+    def _get_index(self, field):
+        if field.isdigit():
+            return int(field)
+        else:
+            return self._head.index(field)
+
+    def _replace_fields(self, expr):
+        if self._head:
+            for i, f in enumerate(self._head):
+                expr = re.sub(r'r\[[\'\"]%s[\'\"]\]' % f, r'r[%d]' % i, expr)
+        return expr
+
+    @classmethod
+    def _convert(cls, e):
         try:
-            if args.head and head is None:
-                head = r
+            return eval(e)
+        except Exception:
+            return e
 
-            if args.head:
-                tr = [
-                    e for i, e in enumerate(r)
-                    if head[i] in fields
-                ]
+    @classmethod
+    def _sorting_insert(cls, lst, e, key):
+        index = 0
+        size = len(lst)
+        ke = key(e)
+
+        while size > 0:
+            m = index + size // 2
+            km = key(lst[m])
+            if km < ke:
+                index = m + 1
+                size = size - size // 2 - 1
             else:
-                tr = [
-                    e for i, e in enumerate(r)
-                    if str(i) in fields
-                ]
+                size = size // 2
 
-            writer.writerow(map(str, tr))
-            sys.stdout.flush()
+        lst.insert(index, e)
 
-        except IOError as err:
-            if err.errno == errno.EPIPE:
-                break
+    def _count(self, row):
+        """
+        cat example.csv | pcsv --head count
+        """
+        if not self._result:
+            init_value = -1 if self._args.head else 0
+            self._result.append([init_value])
+        self._result[0][0] += 1
 
+    def _limit(self, row):
+        """
+        cat example.csv | pcsv --head limit -l 3
+        """
+        if 'counter' not in self._state:
+            init_value = -1 if self._args.head else 0
+            self._state['counter'] = init_value
+        self._state['counter'] += 1
+        if self._state['counter'] >= self._args.limit:
+            self._leave = True
+        return row
 
-def filter(args):
-    """
-        cat example.csv | pcsv filter -c 'r.field1 == 1'
-    """
-    head = None
+    def _select(self, row):
+        """
+        cat example.csv | pcsv --head select -f 'name 0 score1'
+        """
+        if not self._head:
+            self._head = self._create_head(row)
 
-    reader = csv.reader(sys.stdin, delimiter=args.delimiter)
-    writer = csv.writer(sys.stdout, delimiter=args.delimiter)
-    for r in reader:
-        try:
-            if args.head:
-                if head is None:
-                    head = r
-                    writer.writerow(r)
-                    sys.stdout.flush()
-                    continue
-            else:
-                head = list(map(str, range(len(r))))
+        if 'indices' not in self._state:
+            fields = self._args.fields.split()
+            self._state['indices'] = [self._get_index(f) for f in fields]
 
-            r = list(map(_convert, r))
+        return [row[i] for i in self._state['indices']]
 
-            cnd = args.cond
-            for i, h in enumerate(head):
-                cnd = re.sub(r'r\.%s([^\w_]*)' % h, r'r[%d]\1' % i, cnd)
+    def _filter(self, row):
+        """
+        cat example.csv | pcsv --head filter -c 'r["score1"] + r["score2"] > 9.0'
+        """
+        if not self._head:
+            self._head = self._create_head(row)
+            return row
 
-            if eval(cnd):
-                writer.writerow(map(str, r))
-                sys.stdout.flush()
+        else:
+            if 'cond' not in self._state:
+                self._state['cond'] = self._replace_fields(self._args.cond)
 
-        except IOError as err:
-            if err.errno == errno.EPIPE:
-                break
+            r = list(map(self._convert, row))
+            if eval(self._state['cond']):
+                return row
 
+    def _extract(self, row):
+        """
+        cat example.csv | pcsv --head extract -e '[r["name"], r["score1"] + r["score2"]]'
+        """
+        if not self._head:
+            self._head = self._create_head(row)
 
-def extract(args):
-    """
-        cat example.csv | pcsv extract -e '[r.field1 + r.field2, r.field1 - r.field2]'
-    """
-    head = None
+        else:
+            if 'extract' not in self._state:
+                self._state['extract'] = self._replace_fields(self._args.extract)
 
-    reader = csv.reader(sys.stdin, delimiter=args.delimiter)
-    writer = csv.writer(sys.stdout, delimiter=args.delimiter)
-    for r in reader:
-        try:
-            if args.head:
-                if head is None:
-                    head = r
-                    cnt = args.extract.count(',') + 1
-                    writer.writerow(range(cnt))
-                    sys.stdout.flush()
-                    continue
-            else:
-                head = list(map(str, range(len(r))))
+            r = list(map(self._convert, row))
+            return eval(self._state['extract'])
 
-            r = list(map(_convert, r))
+    def _sort(self, row):
+        """
+        cat example.csv | pcsv --head sort -k 'r["score1"] + r["score2"]'
+        """
+        if not self._head:
+            self._head = self._create_head(row)
+            return row
 
-            extr = args.extract
-            for i, h in enumerate(head):
-                extr = re.sub(r'r\.%s([^\w_]*)' % h, r'r[%d]\1' % i, extr)
+        else:
+            if 'key' not in self._state:
+                self._state['key'] = self._replace_fields(self._args.key)
 
-            tr = eval(extr)
+            r = list(map(self._convert, row))
+            self._sorting_insert(self._result, r, key=lambda r: eval(self._state['key']))
 
-            writer.writerow(map(str, tr))
-            sys.stdout.flush()
+    def _aggregate(self, row):
+        """
+        cat example.csv | pcsv --head aggregate -r '__result__ += r["score1"]'
+        cat example.csv | pcsv --head aggregate -b '{"score1_sum": 0, "score2_sum": 0}' -r '__result__["score1_sum"] += r["score1"]; __result__["score2_sum"] += r["score2"]'
+        cat example.csv | pcsv --head aggregate -k 'r["team"]' -r '__result__ += r["score1"] + r["score2"]'
+        """
+        if not self._head:
+            self._head = self._create_head(row)
 
-        except IOError as err:
-            if err.errno == errno.EPIPE:
-                break
+        else:
+            if 'key' not in self._state:
+                self._state['key'] = self._replace_fields(self._args.key)
 
+            if 'begin' not in self._state:
+                self._state['begin'] = eval(self._replace_fields(self._args.begin))
 
-def sort(args):
-    """
-        cat example.csv | pcsv sort -c 'r.field1 + r.field2'
-    """
-    head = None
+            if 'reduce' not in self._state:
+                self._state['reduce'] = self._replace_fields(self._args.reduce)
 
-    reader = csv.reader(sys.stdin, delimiter=args.delimiter)
-    writer = csv.writer(sys.stdout, delimiter=args.delimiter)
-    data = []
-    for r in reader:
-        try:
-            if args.head:
-                if head is None:
-                    head = r
-                    writer.writerow(r)
-                    sys.stdout.flush()
-                    continue
-            else:
-                head = list(map(str, range(len(r))))
+            if 'result_map' not in self._state:
+                self._state['result_map'] = {}
 
-            r = list(map(_convert, r))
+            r = list(map(self._convert, row))
 
-            data.append(r)
+            key = eval(self._state['key'])
 
-        except IOError as err:
-            if err.errno == errno.EPIPE:
-                break
+            if key not in self._state['result_map']:
+                self._state['result_map'][key] = len(self._result)
+                entry = deepcopy(self._state['begin'])
+                self._result.append([key, entry])
 
-    cnd = args.cond
-    for i, h in enumerate(head):
-        cnd = re.sub(r'r\.%s([^\w_]*)' % h, r'r[%d]\1' % i, cnd)
+            index = self._state['result_map'][key]
 
-    data.sort(key=lambda r: eval(cnd))
-
-    for r in data:
-        try:
-            writer.writerow(map(str, r))
-            sys.stdout.flush()
-        except IOError as err:
-            if err.errno == errno.EPIPE:
-                break
-
-
-def aggregate(args):
-    """
-        cat example.csv | pcsv aggregate -k 'r.key1' -b '[0, 0]' -r 'result[0] += 1; result[1] += r.val1;'
-    """
-    result = {}
-
-    head = None
-
-    reader = csv.reader(sys.stdin, delimiter=args.delimiter)
-    writer = csv.writer(sys.stdout, delimiter=args.delimiter)
-    for r in reader:
-        try:
-            if args.head:
-                if head is None:
-                    head = r
-                    continue
-            else:
-                head = list(map(str, range(len(r))))
-
-            r = list(map(_convert, r))
-
-            key = args.key
-            for i, h in enumerate(head):
-                key = re.sub(r'r\.%s([^\w_]*)' % h, r'r[%d]\1' % i, key)
-            key = eval(key)
-
-            if key not in result:
-                result[key] = eval(args.begin)
-
-            redc = args.reduce
-            for i, h in enumerate(head):
-                redc = re.sub(r'r\.%s([^\w_]*)' % h, r'r[%d]\1' % i, redc)
-            redc = redc.replace('result[', 'result[key][')
-
-            exec(redc)
-
-        except IOError as err:
-            if err.errno == errno.EPIPE:
-                break
-
-    writer.writerow(['key', 'value'])
-    sys.stdout.flush()
-
-    for key, value in result.items():
-        writer.writerow([key, value])
-        sys.stdout.flush()
-
-
-def _convert(e):
-    try:
-        return eval(e)
-    except Exception:
-        return e
+            ns = {
+                '__result__': self._result[index][1],
+                'r': r
+            }
+            exec(self._state['reduce'], ns)
+            self._result[index][1] = ns['__result__']
