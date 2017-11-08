@@ -133,15 +133,15 @@ class Pcsv:
         """
         if not self._head:
             self._head = self._create_head(row)
-            return row
-
-        else:
-            if 'cond' not in self._state:
-                self._state['cond'] = self._replace_fields(self._args.cond)
-
-            r = list(map(self._convert, row))
-            if eval(self._state['cond']):
+            if self._args.head:
                 return row
+
+        if 'cond' not in self._state:
+            self._state['cond'] = self._replace_fields(self._args.cond)
+
+        r = list(map(self._convert, row))
+        if eval(self._state['cond']):
+            return row
 
     def _extract(self, row):
         """
@@ -149,13 +149,14 @@ class Pcsv:
         """
         if not self._head:
             self._head = self._create_head(row)
+            if self._args.head:
+                return
 
-        else:
-            if 'extract' not in self._state:
-                self._state['extract'] = self._replace_fields(self._args.extract)
+        if 'extract' not in self._state:
+            self._state['extract'] = self._replace_fields(self._args.extract)
 
-            r = list(map(self._convert, row))
-            return eval(self._state['extract'])
+        r = list(map(self._convert, row))
+        return eval(self._state['extract'])
 
     def _sort(self, row):
         """
@@ -163,14 +164,14 @@ class Pcsv:
         """
         if not self._head:
             self._head = self._create_head(row)
-            return row
+            if self._args.head:
+                return row
 
-        else:
-            if 'key' not in self._state:
-                self._state['key'] = self._replace_fields(self._args.key)
+        if 'key' not in self._state:
+            self._state['key'] = self._replace_fields(self._args.key)
 
-            r = list(map(self._convert, row))
-            self._sorting_insert(self._result, r, key=lambda r: eval(self._state['key']))
+        r = list(map(self._convert, row))
+        self._sorting_insert(self._result, r, key=lambda r: eval(self._state['key']))
 
     def _aggregate(self, row):
         """
@@ -180,34 +181,35 @@ class Pcsv:
         """
         if not self._head:
             self._head = self._create_head(row)
+            if self._args.head:
+                return
 
-        else:
-            if 'key' not in self._state:
-                self._state['key'] = self._replace_fields(self._args.key)
+        if 'key' not in self._state:
+            self._state['key'] = self._replace_fields(self._args.key)
 
-            if 'begin' not in self._state:
-                self._state['begin'] = eval(self._replace_fields(self._args.begin))
+        if 'begin' not in self._state:
+            self._state['begin'] = eval(self._replace_fields(self._args.begin))
 
-            if 'reduce' not in self._state:
-                self._state['reduce'] = self._replace_fields(self._args.reduce)
+        if 'reduce' not in self._state:
+            self._state['reduce'] = self._replace_fields(self._args.reduce)
 
-            if 'result_map' not in self._state:
-                self._state['result_map'] = {}
+        if 'result_map' not in self._state:
+            self._state['result_map'] = {}
 
-            r = list(map(self._convert, row))
+        r = list(map(self._convert, row))
 
-            key = eval(self._state['key'])
+        key = eval(self._state['key'])
 
-            if key not in self._state['result_map']:
-                self._state['result_map'][key] = len(self._result)
-                entry = deepcopy(self._state['begin'])
-                self._result.append([key, entry])
+        if key not in self._state['result_map']:
+            self._state['result_map'][key] = len(self._result)
+            entry = deepcopy(self._state['begin'])
+            self._result.append([key, entry])
 
-            index = self._state['result_map'][key]
+        index = self._state['result_map'][key]
 
-            ns = {
-                '__result__': self._result[index][1],
-                'r': r
-            }
-            exec(self._state['reduce'], ns)
-            self._result[index][1] = ns['__result__']
+        ns = {
+            '__result__': self._result[index][1],
+            'r': r
+        }
+        exec(self._state['reduce'], ns)
+        self._result[index][1] = ns['__result__']
