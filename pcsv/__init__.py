@@ -1,5 +1,6 @@
 import re
 import csv
+import errno
 from copy import deepcopy
 from argparse import ArgumentParser
 
@@ -35,8 +36,15 @@ class Pcsv:
             if self._leave:
                 break
 
-        for resrow in self._result:
-            writer.writerow(resrow)
+        try:
+            for resrow in self._result:
+                writer.writerow(resrow)
+
+        except IOError as err:
+            if err.errno == errno.EPIPE:
+                pass
+            else:
+                raise
 
     def _row_processor(self):
         result = None
