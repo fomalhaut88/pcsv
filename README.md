@@ -1,8 +1,7 @@
 # pcsv
 
-A simple utility working with CSV-files in terminal.
-The advantage is that very big CSV-files can be processed without consuming a lot of RAM,
-because the utility gets data line by line through `stdin`.
+A minimalistic utility to work with heavy CSV-files in terminal. It takes data from `stdin` and outputs the result into `stdout`. It does not consume a lot of RAM because it does not need to keep whole CVS file in memory. Below there are some example of how it can be used.
+
 
 ## Tutorial
 
