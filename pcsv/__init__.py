@@ -1,3 +1,5 @@
+__version__ = '2.1'
+
 import re
 import csv
 import errno

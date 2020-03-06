@@ -8,6 +8,8 @@ import sys
 from distutils.core import setup
 from setuptools import find_packages
 
+from pcsv import __version__
+
 
 scripts = ['bin/pcsv-script.py']
 if sys.platform == 'win32':
@@ -17,7 +19,7 @@ else:
 
 setup(
     name='pcsv',
-    version='2.0',
+    version=__version__,
     packages=find_packages(),
     license="Free",
     long_description=open('README.md').read(),

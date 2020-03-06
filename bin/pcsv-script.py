@@ -3,13 +3,13 @@
 import sys
 from argparse import ArgumentParser
 
-from pcsv import Pcsv
+from pcsv import Pcsv, __version__
 
 
 if __name__ == "__main__":
     parser = ArgumentParser()
 
-    parser.add_argument('cmd', help='command name', choices=Pcsv.COMMANDS)
+    parser.add_argument('cmd', help='command name', choices=Pcsv.COMMANDS + ['version'])
     parser.add_argument('-d', '--delimiter', help='delimiter', default=',')
     parser.add_argument('-l', '--limit', help='limit', type=int)
     parser.add_argument('-f', '--fields', help='fields')
@@ -22,4 +22,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    Pcsv(args).pipe(sys.stdin, sys.stdout)
+    if args.cmd == 'version':
+        print(__version__)
+    else:
+        Pcsv(args).pipe(sys.stdin, sys.stdout)
