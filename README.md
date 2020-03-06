@@ -3,6 +3,17 @@
 A minimalistic utility to work with heavy CSV-files in terminal. It takes data from `stdin` and outputs the result into `stdout`. It does not consume a lot of RAM because it does not need to keep whole CVS file in memory. Below there are some example of how it can be used.
 
 
+## Installation
+
+From pip:
+
+    pip install git+https://github.com/fomalhaut88/pcsv.git
+    
+To check version:
+
+    $ pcsv version
+
+
 ## Tutorial
 
 Supposing we have a following CSV-file:
